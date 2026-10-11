@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="theme-color" content="#1a120a">
+  <title>Battle Heroes</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <div id="app">
+    <section id="setup" class="screen">
+      <div class="panel setup-panel">
+        <h1>Battle Heroes</h1>
+        <p class="subtitle">Muster your army &mdash; choose up to 7 creature stacks</p>
+        <div id="unit-grid"></div>
+        <div class="setup-footer">
+          <div class="enemy-choice">
+            <span>Enemy army:</span>
+            <button class="toggle active" data-enemy="mirror">Mirror</button>
+            <button class="toggle" data-enemy="random">Random</button>
+          </div>
+          <div id="selected-count"></div>
+          <button id="btn-start" class="btn-gold">To Battle!</button>
+        </div>
+      </div>
+    </section>
+
+    <section id="battle" class="screen hidden">
+      <div id="field-wrap"><canvas id="field"></canvas></div>
+      <div id="hud">
+        <div id="queue"></div>
+        <div id="controls">
+          <div class="btn-group">
+            <button id="btn-retreat" class="btn-stone" title="Retreat (Esc)">&#9873;<span>Retreat</span></button>
+            <button id="btn-auto" class="btn-stone" title="Auto combat (A)">&#9881;<span>Auto</span></button>
+          </div>
+          <div id="info"></div>
+          <div id="log"></div>
+          <div class="btn-group">
+            <button id="btn-wait" class="btn-stone" title="Wait (W)">&#8987;<span>Wait</span></button>
+            <button id="btn-defend" class="btn-stone" title="Defend (D)">&#128737;<span>Defend</span></button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <div id="modal" class="hidden"><div class="panel" id="modal-body"></div></div>
+    <div id="unit-card" class="panel hidden"></div>
+  </div>
+
+  <script src="js/hex.js"></script>
+  <script src="js/units.js"></script>
+  <script src="js/battle.js"></script>
+  <script src="js/ai.js"></script>
+  <script src="js/sprites.js"></script>
+  <script src="js/renderer.js"></script>
+  <script src="js/game.js"></script>
+</body>
+</html>
