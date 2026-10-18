@@ -1,0 +1,43 @@
+// Per-unit price factors from scripts/calibrate-costs.js (generated; do not edit by hand).
+// Final price = formula cost (js/units.js) × factor, so equal-gold armies are evenly matched.
+(function (root) {
+  const BH = (root.BH = root.BH || {});
+  BH.BALANCE = {
+    pikeman: 1.063,
+    archer: 0.970,
+    griffin: 0.858,
+    swordsman: 1.086,
+    monk: 1.095,
+    cavalier: 1.087,
+    angel: 0.794,
+    dwarf: 1.136,
+    woodelf: 1.034,
+    dendroid: 1.182,
+    unicorn: 1.106,
+    dragon: 0.822,
+    golem: 1.269,
+    mage: 0.938,
+    naga: 1.298,
+    titan: 0.941,
+    cerberus: 0.990,
+    efreet: 0.884,
+    devil: 0.849,
+    skeleton: 0.985,
+    wight: 0.869,
+    vampire: 1.276,
+    lich: 0.861,
+    dreadknight: 1.147,
+    bonedragon: 0.924,
+    harpy: 0.857,
+    beholder: 1.047,
+    medusa: 0.979,
+    minotaur: 1.074,
+    blackdragon: 0.796,
+    wolfrider: 0.829,
+    cyclops: 1.042,
+    behemoth: 1.207,
+    gorgon: 1.193,
+    hydra: 1.170,
+    phoenix: 0.742,
+  };
+})(typeof window !== 'undefined' ? window : globalThis);

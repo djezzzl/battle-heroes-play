@@ -15,28 +15,37 @@
     <section id="setup" class="screen">
       <div class="panel setup-panel">
         <h1>Battle Heroes</h1>
-        <p class="subtitle">Muster your army &mdash; choose up to 7 creature stacks</p>
+        <p class="subtitle">Hire up to 7 creature stacks with your gold &mdash; a few mighty dragons or a horde of archers</p>
         <div id="faction-tabs"></div>
         <div id="unit-grid"></div>
       </div>
-      <div class="panel setup-footer">
-        <div class="army">
-          <span class="army-label">Your army <b id="selected-count"></b></span>
-          <div id="army-strip"></div>
-          <button id="btn-random-army" class="toggle" title="Pick 7 random units from the current tab">&#127922; Random</button>
+      <aside id="army-panel" class="panel">
+        <h2>Your Army</h2>
+        <div class="budget">
+          <div class="budget-label">Gold for this battle</div>
+          <div id="budget-presets"></div>
+          <label class="budget-custom">Custom: <input id="budget-input" type="number" min="100" step="500" inputmode="numeric"></label>
+        </div>
+        <div class="gold-bar"><div id="gold-fill"></div></div>
+        <div id="gold-text"></div>
+        <div id="army-list"></div>
+        <div class="army-actions">
+          <button id="btn-random-army" class="toggle" title="Random army from the current tab, spending the budget">&#127922; Random army</button>
           <button id="btn-clear-army" class="toggle">Clear</button>
         </div>
         <div class="enemy-choice">
           <span>Enemy:</span>
-          <button class="toggle active" data-enemy="mirror" title="Same army as yours">Mirror</button>
-          <button class="toggle" data-enemy="random" title="Random units, equal total strength">Random</button>
+          <button class="toggle" data-enemy="mirror" title="Same army as yours">Mirror</button>
+          <button class="toggle" data-enemy="random" title="Random army spending at least 97% of the budget">Random</button>
         </div>
-        <div class="audio-toggles">
-          <button class="toggle audio-music" title="Music on/off (M)">&#127925;</button>
-          <button class="toggle audio-sfx" title="Sound effects on/off (S)">&#128266;</button>
+        <div class="panel-bottom">
+          <div class="audio-toggles">
+            <button class="toggle audio-music" title="Music on/off (M)">&#127925;</button>
+            <button class="toggle audio-sfx" title="Sound effects on/off (S)">&#128266;</button>
+          </div>
+          <button id="btn-start" class="btn-gold">To Battle!</button>
         </div>
-        <button id="btn-start" class="btn-gold">To Battle!</button>
-      </div>
+      </aside>
     </section>
 
     <section id="battle" class="screen hidden">
@@ -67,9 +76,11 @@
   </div>
 
   <script src="js/hex.js"></script>
+  <script src="js/balance.js"></script>
   <script src="js/units.js"></script>
   <script src="js/battle.js"></script>
   <script src="js/ai.js"></script>
+  <script src="js/army.js"></script>
   <script src="js/sprites.js"></script>
   <script src="js/sprites/good.js"></script>
   <script src="js/sprites/evil.js"></script>

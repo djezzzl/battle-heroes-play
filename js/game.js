@@ -1,15 +1,17 @@
 // Game controller: setup screen, battle flow, input and HUD.
 (function () {
   const BH = window.BH;
-  const { Hex, Units, Battle: B, AI, Sprites, Renderer, Audio } = BH;
+  const { Hex, Units, Battle: B, AI, Sprites, Renderer, Audio, Army } = BH;
   const sfx = (name, opts) => Audio && Audio.play(name, opts);
 
   const $ = (sel) => document.querySelector(sel);
-  const DEFAULT_ARMY = ['pikeman', 'archer', 'griffin', 'swordsman', 'monk', 'mage', 'cavalier'];
-  const MAX_STACKS = 7;
+  const MAX_STACKS = Army.MAX_STACKS;
+  const SETUP_KEY = 'bh.setup';
+  const fmt = (n) => Math.round(n).toLocaleString('en-US');
 
   const state = {
-    selected: new Set(DEFAULT_ARMY),
+    army: [],
+    budget: Army.DEFAULT_BUDGET,
     faction: 'all',
     enemyMode: 'mirror',
     armies: null,
@@ -56,7 +58,7 @@
       ['Initiative', def.initiative],
     ];
     if (def.shots) rows.push(['Shots', unit ? `${unit.shots}/${def.shots}` : def.shots]);
-    rows.push(unit ? ['Count', unit.count] : ['Stack', def.stack]);
+    rows.push(unit ? ['Count', unit.count] : ['Cost', `💰 ${fmt(def.cost)}`]);
     return `<div class="stats">${rows.map(([k, v]) => `<div>${k}<b>${v}</b></div>`).join('')}</div>`;
   }
 
@@ -93,6 +95,45 @@
     return `<div class="perk-chips">${list.map((p) => `<span class="perk" title="${p.desc}">${p.label}</span>`).join('')}</div>`;
   }
 
+  function loadSetup() {
+    try {
+      const saved = JSON.parse(localStorage.getItem(SETUP_KEY) || 'null');
+      if (!saved) return false;
+      if (saved.budget > 0) state.budget = Math.round(saved.budget);
+      if (saved.enemyMode === 'random' || saved.enemyMode === 'mirror') state.enemyMode = saved.enemyMode;
+      state.army = (saved.army || [])
+        .filter((s) => Units.BY_ID[s.type] && s.count > 0)
+        .slice(0, MAX_STACKS)
+        .map((s) => ({ type: s.type, count: Math.floor(s.count) }));
+      fitArmyToBudget();
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  function saveSetup() {
+    try {
+      localStorage.setItem(SETUP_KEY, JSON.stringify({ budget: state.budget, army: state.army, enemyMode: state.enemyMode }));
+    } catch (e) {
+      // storage unavailable: nothing to persist
+    }
+  }
+
+  // Shrinks the army proportionally when the budget is lowered below its cost.
+  function fitArmyToBudget() {
+    const total = Army.totalCost(state.army);
+    if (total <= state.budget) return;
+    const f = state.budget / total;
+    for (const s of state.army) s.count = Math.floor(s.count * f);
+    state.army = state.army.filter((s) => s.count > 0);
+    while (Army.totalCost(state.army) > state.budget && state.army.length) {
+      const s = state.army.reduce((a, b) => (Army.costOf(a.type) >= Army.costOf(b.type) ? a : b));
+      s.count -= 1;
+      state.army = state.army.filter((x) => x.count > 0);
+    }
+  }
+
   function buildSetup() {
     const tabs = $('#faction-tabs');
     tabs.innerHTML = '';
@@ -120,94 +161,181 @@
       pc.height = 150;
       Sprites.portrait(pc, def.id, 'player');
       card.appendChild(pc);
+      const price = document.createElement('div');
+      price.className = 'price-tag';
+      price.textContent = `💰 ${fmt(def.cost)}`;
+      card.appendChild(price);
       const body = document.createElement('div');
       body.innerHTML = `<h3>${def.name}${badge(def)}</h3>
         <div class="faction-tag">${factionName(def.faction)} · Tier ${def.tier}</div>
-        <div class="desc">${def.description}</div>${statsHtml(def)}${perksHtml(def, true)}`;
+        <div class="desc">${def.description}</div>${statsHtml(def)}${perksHtml(def, true)}
+        <div class="afford"></div>`;
       card.appendChild(body);
       card.addEventListener('click', () => toggleUnit(def.id));
       grid.appendChild(card);
     }
+
+    const presets = $('#budget-presets');
+    for (const b of Army.BUDGET_PRESETS) {
+      const btn = document.createElement('button');
+      btn.className = 'toggle preset';
+      btn.dataset.budget = b;
+      btn.textContent = b >= 1000 ? `${b / 1000}k` : String(b);
+      btn.addEventListener('click', () => setBudget(b));
+      presets.appendChild(btn);
+    }
+    $('#budget-input').addEventListener('change', (e) => setBudget(+e.target.value));
+
     document.querySelectorAll('[data-enemy]').forEach((b) =>
       b.addEventListener('click', () => {
         state.enemyMode = b.dataset.enemy;
-        document.querySelectorAll('[data-enemy]').forEach((x) => x.classList.toggle('active', x === b));
+        saveSetup();
+        refreshSetup();
       })
     );
     $('#btn-random-army').addEventListener('click', () => {
       const pool = Units.UNITS.filter((u) => state.faction === 'all' || u.faction === state.faction).map((u) => u.id);
-      state.selected = new Set(shuffle(pool).slice(0, MAX_STACKS));
-      refreshSetup();
+      state.army = Army.randomArmy(state.budget, Math.random, { pool });
+      changed(true);
     });
     $('#btn-clear-army').addEventListener('click', () => {
-      state.selected.clear();
-      refreshSetup();
+      state.army = [];
+      changed(true);
     });
-    $('#btn-start').addEventListener('click', () => startBattle(makeArmies()));
-    refreshSetup();
+    $('#btn-start').addEventListener('click', () => {
+      if (Army.isValid(state.army, state.budget)) startBattle(makeArmies());
+    });
+
+    if (!loadSetup()) state.army = Army.randomArmy(state.budget, Math.random, { pool: ['pikeman', 'archer', 'griffin', 'swordsman', 'monk', 'cavalier'] });
+    changed(true);
   }
 
-  function shuffle(arr) {
-    const a = arr.slice();
-    for (let i = a.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [a[i], a[j]] = [a[j], a[i]];
-    }
-    return a;
+  function setBudget(b) {
+    if (!Number.isFinite(b) || b <= 0) b = Army.DEFAULT_BUDGET;
+    state.budget = Math.min(10000000, Math.max(100, Math.round(b)));
+    fitArmyToBudget();
+    changed(true);
   }
 
   function toggleUnit(id) {
-    if (state.selected.has(id)) state.selected.delete(id);
-    else if (state.selected.size < MAX_STACKS) state.selected.add(id);
+    const i = state.army.findIndex((s) => s.type === id);
+    if (i >= 0) state.army.splice(i, 1);
+    else if (state.army.length < MAX_STACKS && Army.maxAffordable(id, state.budget, state.army) > 0) {
+      state.army.push({ type: id, count: Army.defaultCount(id, state.budget, state.army) });
+    } else return;
+    changed(true);
+  }
+
+  // Re-renders after an army change. rebuild=false keeps existing rows (used while dragging a slider).
+  function changed(rebuild) {
+    saveSetup();
+    if (rebuild) buildArmyList();
     refreshSetup();
   }
 
+  function setCount(type, n) {
+    const s = state.army.find((x) => x.type === type);
+    if (!s) return;
+    const max = Army.maxAffordable(type, state.budget, state.army);
+    s.count = Math.max(1, Math.min(max, Math.floor(n) || 1));
+  }
+
+  function buildArmyList() {
+    const list = $('#army-list');
+    list.innerHTML = '';
+    if (!state.army.length) {
+      list.innerHTML = '<div class="army-empty">Tap creatures on the left to hire them.</div>';
+      return;
+    }
+    for (const s of state.army) {
+      const def = Units.BY_ID[s.type];
+      const row = document.createElement('div');
+      row.className = 'army-row';
+      row.dataset.type = s.type;
+      const pc = portraitCanvas(def.id, 'player', 96);
+      pc.className = 'row-portrait';
+      row.appendChild(pc);
+      const main = document.createElement('div');
+      main.className = 'row-main';
+      main.innerHTML = `
+        <div class="row-head"><b>${def.name}</b><span class="row-each">💰 ${fmt(def.cost)} each</span>
+          <button class="row-remove" title="Remove">✕</button></div>
+        <div class="row-controls">
+          <button class="toggle step" data-d="-1">−</button>
+          <input class="count" type="number" min="1" inputmode="numeric">
+          <button class="toggle step" data-d="1">+</button>
+          <button class="toggle max">Max</button>
+          <span class="subtotal"></span>
+        </div>
+        <input class="slider" type="range" min="1">`;
+      row.appendChild(main);
+      main.querySelector('.row-remove').addEventListener('click', () => toggleUnit(s.type));
+      main.querySelectorAll('.step').forEach((b) =>
+        b.addEventListener('click', () => {
+          setCount(s.type, s.count + +b.dataset.d);
+          changed(false);
+        })
+      );
+      main.querySelector('.max').addEventListener('click', () => {
+        setCount(s.type, Army.maxAffordable(s.type, state.budget, state.army));
+        changed(false);
+      });
+      main.querySelector('.count').addEventListener('change', (e) => {
+        setCount(s.type, +e.target.value);
+        changed(false);
+      });
+      main.querySelector('.slider').addEventListener('input', (e) => {
+        setCount(s.type, +e.target.value);
+        changed(false);
+      });
+      list.appendChild(row);
+    }
+  }
+
   function refreshSetup() {
+    const spent = Army.totalCost(state.army);
+    const left = state.budget - spent;
     document.querySelectorAll('#faction-tabs .tab').forEach((t) => t.classList.toggle('active', t.dataset.faction === state.faction));
+    document.querySelectorAll('#budget-presets .preset').forEach((b) => b.classList.toggle('active', +b.dataset.budget === state.budget));
+    if (document.activeElement !== $('#budget-input')) $('#budget-input').value = state.budget;
+    document.querySelectorAll('[data-enemy]').forEach((x) => x.classList.toggle('active', x.dataset.enemy === state.enemyMode));
+
+    const inArmy = new Set(state.army.map((s) => s.type));
     document.querySelectorAll('.unit-card').forEach((c) => {
-      c.classList.toggle('selected', state.selected.has(c.dataset.id));
-      c.classList.toggle('full', !state.selected.has(c.dataset.id) && state.selected.size >= MAX_STACKS);
+      const id = c.dataset.id;
+      const max = Army.maxAffordable(id, state.budget, state.army);
+      const selected = inArmy.has(id);
+      c.classList.toggle('selected', selected);
+      c.classList.toggle('full', !selected && state.army.length >= MAX_STACKS);
+      c.classList.toggle('unaffordable', !selected && max < 1);
       c.classList.toggle('hidden', state.faction !== 'all' && c.dataset.faction !== state.faction);
+      c.querySelector('.afford').textContent = selected
+        ? `In army: ${state.army.find((s) => s.type === id).count}`
+        : max < 1 ? 'Not enough gold' : `You can afford ${fmt(max)}`;
     });
-    const strip = $('#army-strip');
-    strip.innerHTML = '';
-    const ids = [...state.selected];
-    for (let i = 0; i < MAX_STACKS; i++) {
-      const slot = document.createElement('div');
-      slot.className = 'army-slot';
-      if (ids[i]) {
-        const def = Units.BY_ID[ids[i]];
-        slot.appendChild(portraitCanvas(def.id, 'player', 96));
-        slot.title = `${def.name} — click to remove`;
-        const n = document.createElement('span');
-        n.className = 'n';
-        n.textContent = def.stack;
-        slot.appendChild(n);
-        slot.addEventListener('click', () => toggleUnit(def.id));
-      } else {
-        slot.classList.add('empty');
-      }
-      strip.appendChild(slot);
+
+    for (const row of document.querySelectorAll('.army-row')) {
+      const s = state.army.find((x) => x.type === row.dataset.type);
+      if (!s) continue;
+      const max = Army.maxAffordable(s.type, state.budget, state.army);
+      const input = row.querySelector('.count');
+      if (document.activeElement !== input) input.value = s.count;
+      input.max = max;
+      const slider = row.querySelector('.slider');
+      slider.max = Math.max(1, max);
+      if (document.activeElement !== slider) slider.value = s.count;
+      row.querySelector('.subtotal').textContent = `= 💰 ${fmt(s.count * Army.costOf(s.type))}`;
     }
-    $('#selected-count').textContent = `${state.selected.size} / ${MAX_STACKS}`;
-    $('#btn-start').disabled = state.selected.size === 0;
+
+    $('#gold-fill').style.width = `${Math.min(100, (spent / state.budget) * 100)}%`;
+    $('#gold-text').innerHTML = `Spent <b>${fmt(spent)}</b> of ${fmt(state.budget)} · <b>${fmt(left)}</b> left · ${state.army.length}/${MAX_STACKS} stacks`;
+    $('#btn-start').disabled = !Army.isValid(state.army, state.budget);
   }
 
-  function armyValue(army) {
-    return army.reduce((sum, s) => sum + Units.BY_ID[s.type].value * (s.count != null ? s.count : Units.BY_ID[s.type].stack), 0);
-  }
-
-  // Random enemy types with stack sizes scaled so the total army value matches the player's.
   function makeArmies() {
-    const player = [...state.selected].map((id) => ({ type: id, count: Units.BY_ID[id].stack }));
-    let ai = player.map((s) => ({ ...s }));
-    if (state.enemyMode === 'random') {
-      const types = shuffle(Units.UNITS.map((u) => u.id)).slice(0, player.length);
-      ai = types.map((type) => ({ type, count: Units.BY_ID[type].stack }));
-      const factor = armyValue(player) / armyValue(ai);
-      ai = ai.map((s) => ({ type: s.type, count: Math.max(1, Math.round(s.count * factor)) }));
-    }
-    return { player, ai };
+    const player = state.army.map((s) => ({ type: s.type, count: s.count }));
+    const ai = state.enemyMode === 'random' ? Army.randomArmy(state.budget) : player.map((s) => ({ ...s }));
+    return { player, ai, budget: state.budget };
   }
 
   // ------------------------------------------------------------ battle flow
@@ -599,12 +727,16 @@
     sfx(win ? 'victory' : 'defeat');
     showModal(`<h2>${win ? 'Victory!' : 'Defeat'}</h2>
       <p>${win ? 'The enemy army has been destroyed.' : 'Your army has fallen.'} Battle lasted ${state.battle.round} rounds.</p>
+      <p class="gold-compare">Your army: 💰 ${fmt(Army.totalCost(state.armies.player))} · Enemy army: 💰 ${fmt(Army.totalCost(state.armies.ai))}</p>
       <div class="casualties">${casualtiesHtml('player')}${casualtiesHtml('ai')}</div>
       <div class="modal-buttons"><button class="btn-gold" id="m-again">Fight again</button>
       <button class="btn-gold" id="m-setup">Change army</button></div>`);
     // canvases serialized via outerHTML lose their pixels; repaint them
     document.querySelectorAll('#modal-body canvas[data-type]').forEach((c) => Sprites.portrait(c, c.dataset.type, c.dataset.side));
-    $('#m-again').onclick = () => startBattle(state.armies);
+    $('#m-again').onclick = () => {
+      const { player, ai, budget } = state.armies;
+      startBattle({ player, ai: state.enemyMode === 'random' ? Army.randomArmy(budget) : ai, budget });
+    };
     $('#m-setup').onclick = goToSetup;
   }
 
