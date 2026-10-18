@@ -22,6 +22,14 @@
     };
   }
 
+  const PROJECTILES = { mage: 'fireball', monk: 'bolt', lich: 'cloud', titan: 'lightning', beholder: 'ray', cyclops: 'rock' };
+  const ORB_COLORS = {
+    fireball: ['rgba(255,255,200,1)', 'rgba(255,170,30,0.95)', 'rgba(220,40,0,0)'],
+    bolt: ['rgba(255,255,255,1)', 'rgba(255,240,140,0.9)', 'rgba(255,220,60,0)'],
+    cloud: ['rgba(230,255,210,1)', 'rgba(120,210,60,0.9)', 'rgba(40,90,20,0)'],
+    lightning: ['rgba(255,255,255,1)', 'rgba(140,200,255,0.95)', 'rgba(60,120,255,0)'],
+    ray: ['rgba(255,230,255,1)', 'rgba(200,80,255,0.9)', 'rgba(90,0,140,0)'],
+  };
   const ease = (t) => (t < 0.5 ? 2 * t * t : 1 - (-2 * t + 2) ** 2 / 2);
   const now = () => performance.now();
 
@@ -433,9 +441,10 @@
       ctx.shadowBlur = 2;
       ctx.fillText(text, x + w / 2, y + h / 2 + 1);
       ctx.shadowBlur = 0;
-      if (u.defending) {
+      const icons = (u.defending ? '🛡' : '') + (u.stunned ? '💫' : '') + (B.isBound(this.battle, u) ? '🌿' : '');
+      if (icons) {
         ctx.font = `${Math.round(fs * 0.9)}px serif`;
-        ctx.fillText('🛡', x + w / 2, y - fs * 0.6);
+        ctx.fillText(icons, x + w / 2, y - fs * 0.6);
       }
     }
 
@@ -492,6 +501,7 @@
         if (ev.kind === 'move') await this.animMove(ev, speed);
         else if (ev.kind === 'attack') await this.animAttack(ev, speed);
         else if (ev.kind === 'defend') await this.animDefend(ev, speed);
+        else if (ev.kind === 'effect') await this.animEffect(ev, speed);
       }
       for (const u of this.battle.units) {
         const d = this.display.get(u.id);
@@ -501,6 +511,17 @@
 
     async animMove(ev, speed) {
       const d = this.display.get(ev.unitId);
+      if (ev.teleport) {
+        const to = norm(ev.path[ev.path.length - 1].col, ev.path[ev.path.length - 1].row);
+        d.facing = to.x >= d.x ? 1 : -1;
+        this.addBurst(d, 'teleport', 400 / speed);
+        await this.tween(220 / speed, (k) => (d.alpha = 1 - k));
+        d.x = to.x;
+        d.y = to.y;
+        this.addBurst(d, 'teleport', 400 / speed);
+        await this.tween(220 / speed, (k) => (d.alpha = k));
+        return;
+      }
       if (ev.flying) {
         const from = { x: d.x, y: d.y };
         const to = norm(ev.path[ev.path.length - 1].col, ev.path[ev.path.length - 1].row);
@@ -541,7 +562,7 @@
         const dx = dt.x - da.x;
         const dy = dt.y - da.y;
         await this.tween(140 / speed, (k) => (da.lunge = { x: dx * 0.3 * ease(k), y: dy * 0.3 * ease(k) }));
-        if (att.def.attackType === 'splash') this.addBurst(dt, 'fire', 450 / speed);
+        if (att.def.attackType === 'splash' || att.def.perks.breath) this.addBurst(dt, 'fire', 450 / speed);
       }
       this.applyHits(ev, speed);
       if (!ev.ranged) await this.tween(160 / speed, (k) => (da.lunge = { x: (dt.x - da.x) * 0.3 * (1 - k), y: (dt.y - da.y) * 0.3 * (1 - k) }));
@@ -552,7 +573,14 @@
     applyHits(ev, speed) {
       for (const h of ev.hits) {
         const d = this.display.get(h.unitId);
-        if (ev.splash && h.unitId !== ev.targetId) this.addBurst(d, 'fire', 450 / speed);
+        if (h.unitId !== ev.targetId) {
+          const att = B.getUnit(this.battle, ev.attackerId);
+          const fiery = att.def.attackType === 'splash' || att.def.perks.breath;
+          this.addBurst(d, att.type === 'lich' ? 'cloud' : fiery ? 'fire' : 'stare', 450 / speed);
+        }
+        if (ev.deathBlow && h.unitId === ev.targetId) {
+          this.texts.push({ x: d.x, y: d.y - 2.2, text: 'Death blow!', color: '#ff6060', t0: now(), dur: 1200 / speed, scale: 0.5 });
+        }
         d.count = h.countAfter;
         this.texts.push({ x: d.x, y: d.y - 1.6, text: `-${h.damage}`, color: '#ffdf6a', t0: now(), dur: 1100 / speed, scale: 0.55 });
         if (h.kills) this.texts.push({ x: d.x, y: d.y - 1.0, text: `${h.kills} perish`, color: '#ff8a7a', t0: now() + 120, dur: 1100 / speed, scale: 0.4 });
@@ -567,7 +595,7 @@
     }
 
     animProjectile(att, da, dt, speed) {
-      const kind = att.type === 'mage' ? 'fireball' : att.type === 'monk' ? 'bolt' : 'arrow';
+      const kind = PROJECTILES[att.type] || 'arrow';
       const from = { x: da.x + da.facing * 0.5, y: da.y - 1.1 };
       const to = { x: dt.x, y: dt.y - 0.8 };
       const dist = Math.hypot(to.x - from.x, to.y - from.y);
@@ -597,18 +625,34 @@
             ctx.lineTo(s * 0.25, s * 0.08);
             ctx.fill();
             ctx.restore();
-          } else {
-            const rad = s * (kind === 'fireball' ? 0.45 : 0.3);
-            const g = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, rad);
-            if (kind === 'fireball') {
-              g.addColorStop(0, 'rgba(255,255,200,1)');
-              g.addColorStop(0.4, 'rgba(255,170,30,0.95)');
-              g.addColorStop(1, 'rgba(220,40,0,0)');
-            } else {
-              g.addColorStop(0, 'rgba(255,255,255,1)');
-              g.addColorStop(0.4, 'rgba(255,240,140,0.9)');
-              g.addColorStop(1, 'rgba(255,220,60,0)');
+          } else if (kind === 'rock') {
+            ctx.save();
+            ctx.translate(p.x, p.y);
+            ctx.rotate(k * 12);
+            const rr = s * 0.28;
+            const g = ctx.createRadialGradient(-rr * 0.3, -rr * 0.3, 1, 0, 0, rr);
+            g.addColorStop(0, '#c8c0b0');
+            g.addColorStop(1, '#4a443a');
+            ctx.fillStyle = g;
+            ctx.strokeStyle = '#2a251e';
+            ctx.beginPath();
+            for (let i = 0; i < 7; i++) {
+              const a = (i / 7) * Math.PI * 2;
+              const q = rr * (0.8 + 0.2 * Math.sin(i * 3.7));
+              if (i === 0) ctx.moveTo(Math.cos(a) * q, Math.sin(a) * q);
+              else ctx.lineTo(Math.cos(a) * q, Math.sin(a) * q);
             }
+            ctx.closePath();
+            ctx.fill();
+            ctx.stroke();
+            ctx.restore();
+          } else {
+            const rad = s * (kind === 'fireball' || kind === 'cloud' ? 0.45 : 0.32);
+            const cols = ORB_COLORS[kind] || ORB_COLORS.bolt;
+            const g = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, rad);
+            g.addColorStop(0, cols[0]);
+            g.addColorStop(0.4, cols[1]);
+            g.addColorStop(1, cols[2]);
             ctx.fillStyle = g;
             ctx.beginPath();
             ctx.arc(p.x, p.y, rad, 0, Math.PI * 2);
@@ -618,7 +662,9 @@
       });
       return this.wait(dur).then(() => {
         if (kind === 'fireball') this.addBurst(dt, 'fire', 500 / speed);
-        else if (kind === 'bolt') this.addBurst(dt, 'holy', 400 / speed);
+        else if (kind === 'cloud') this.addBurst(dt, 'cloud', 500 / speed);
+        else if (kind === 'ray') this.addBurst(dt, 'stare', 400 / speed);
+        else if (kind === 'bolt' || kind === 'lightning') this.addBurst(dt, 'holy', 400 / speed);
       });
     }
 
@@ -636,6 +682,18 @@
             g.addColorStop(0, `rgba(255,255,200,${a})`);
             g.addColorStop(0.35, `rgba(255,160,20,${a * 0.9})`);
             g.addColorStop(1, 'rgba(200,30,0,0)');
+          } else if (kind === 'heal') {
+            g.addColorStop(0, `rgba(220,255,220,${a})`);
+            g.addColorStop(0.4, `rgba(90,230,110,${a * 0.8})`);
+            g.addColorStop(1, 'rgba(40,160,60,0)');
+          } else if (kind === 'stare' || kind === 'teleport') {
+            g.addColorStop(0, `rgba(255,230,255,${a})`);
+            g.addColorStop(0.4, `rgba(170,60,220,${a * 0.8})`);
+            g.addColorStop(1, 'rgba(80,0,120,0)');
+          } else if (kind === 'cloud') {
+            g.addColorStop(0, `rgba(220,255,200,${a})`);
+            g.addColorStop(0.4, `rgba(120,200,60,${a * 0.8})`);
+            g.addColorStop(1, 'rgba(40,90,20,0)');
           } else {
             g.addColorStop(0, `rgba(255,255,255,${a})`);
             g.addColorStop(0.4, `rgba(255,240,150,${a * 0.8})`);
@@ -647,6 +705,43 @@
           ctx.fill();
         },
       });
+    }
+
+    async animEffect(ev, speed) {
+      for (const h of ev.hits) {
+        const d = this.display.get(h.unitId);
+        if (!d) continue;
+        const t0 = now();
+        if (h.reborn) {
+          this.addBurst(d, 'fire', 700 / speed);
+          d.dead = false;
+          d.deathT = 0;
+          d.alpha = 1;
+          d.count = h.countAfter;
+          this.texts.push({ x: d.x, y: d.y - 1.6, text: h.text, color: '#ffb040', t0, dur: 1300 / speed, scale: 0.55 });
+          continue;
+        }
+        if (h.heal) {
+          this.addBurst(d, 'heal', 600 / speed);
+          this.texts.push({ x: d.x, y: d.y - 1.6, text: `+${h.heal}`, color: '#7dff8a', t0, dur: 1100 / speed, scale: 0.55 });
+          if (h.revived) this.texts.push({ x: d.x, y: d.y - 1.0, text: `${h.revived} rise`, color: '#b8ffb0', t0: t0 + 120, dur: 1100 / speed, scale: 0.4 });
+        } else if (h.damage || h.kills) {
+          if (ev.fire) this.addBurst(d, 'fire', 450 / speed);
+          else this.addBurst(d, 'stare', 500 / speed);
+          if (h.damage) this.texts.push({ x: d.x, y: d.y - 1.6, text: `-${h.damage}`, color: '#ffdf6a', t0, dur: 1100 / speed, scale: 0.55 });
+          if (h.kills) this.texts.push({ x: d.x, y: d.y - 1.0, text: `${h.kills} perish`, color: '#ff8a7a', t0: t0 + 120, dur: 1100 / speed, scale: 0.4 });
+          this.tween(380 / speed, (k) => (d.flash = 0.6 * (1 - k)));
+          if (h.dead) {
+            d.dead = true;
+            this.tween(500 / speed, (k) => (d.deathT = k));
+          }
+        }
+        if (h.text && !h.heal && !h.reborn) {
+          this.texts.push({ x: d.x, y: d.y - 2.2, text: h.text, color: '#d8c8ff', t0, dur: 1200 / speed, scale: 0.45 });
+        }
+        d.count = h.countAfter;
+      }
+      await this.wait(380 / speed);
     }
 
     async animDefend(ev, speed) {

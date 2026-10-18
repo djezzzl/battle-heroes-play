@@ -9,6 +9,7 @@
 
   const state = {
     selected: new Set(DEFAULT_ARMY),
+    faction: 'all',
     enemyMode: 'mirror',
     armies: null,
     battle: null,
@@ -78,21 +79,50 @@
 
   // ------------------------------------------------------------ setup screen
 
+  function factionName(id) {
+    return Units.FACTIONS.find((f) => f.id === id).name;
+  }
+
+  function perksHtml(def, withDesc) {
+    const list = Units.perkList(def);
+    if (!list.length) return '';
+    if (withDesc) {
+      return `<ul class="perks">${list.map((p) => `<li><b>${p.label}</b> — ${p.desc}</li>`).join('')}</ul>`;
+    }
+    return `<div class="perk-chips">${list.map((p) => `<span class="perk" title="${p.desc}">${p.label}</span>`).join('')}</div>`;
+  }
+
   function buildSetup() {
+    const tabs = $('#faction-tabs');
+    tabs.innerHTML = '';
+    for (const f of [{ id: 'all', name: 'All' }, ...Units.FACTIONS]) {
+      const b = document.createElement('button');
+      b.className = 'tab' + (f.id === state.faction ? ' active' : '');
+      b.dataset.faction = f.id;
+      b.textContent = f.name;
+      b.addEventListener('click', () => {
+        state.faction = f.id;
+        refreshSetup();
+      });
+      tabs.appendChild(b);
+    }
     const grid = $('#unit-grid');
     grid.innerHTML = '';
     for (const def of Units.UNITS) {
       const card = document.createElement('div');
       card.className = 'unit-card';
       card.dataset.id = def.id;
+      card.dataset.faction = def.faction;
       const pc = document.createElement('canvas');
       pc.className = 'portrait';
       pc.width = 240;
-      pc.height = 180;
+      pc.height = 150;
       Sprites.portrait(pc, def.id, 'player');
       card.appendChild(pc);
       const body = document.createElement('div');
-      body.innerHTML = `<h3>${def.name}${badge(def)}</h3><div class="desc">${def.description}</div>${statsHtml(def)}`;
+      body.innerHTML = `<h3>${def.name}${badge(def)}</h3>
+        <div class="faction-tag">${factionName(def.faction)} · Tier ${def.tier}</div>
+        <div class="desc">${def.description}</div>${statsHtml(def)}${perksHtml(def, true)}`;
       card.appendChild(body);
       card.addEventListener('click', () => toggleUnit(def.id));
       grid.appendChild(card);
@@ -103,8 +133,26 @@
         document.querySelectorAll('[data-enemy]').forEach((x) => x.classList.toggle('active', x === b));
       })
     );
+    $('#btn-random-army').addEventListener('click', () => {
+      const pool = Units.UNITS.filter((u) => state.faction === 'all' || u.faction === state.faction).map((u) => u.id);
+      state.selected = new Set(shuffle(pool).slice(0, MAX_STACKS));
+      refreshSetup();
+    });
+    $('#btn-clear-army').addEventListener('click', () => {
+      state.selected.clear();
+      refreshSetup();
+    });
     $('#btn-start').addEventListener('click', () => startBattle(makeArmies()));
     refreshSetup();
+  }
+
+  function shuffle(arr) {
+    const a = arr.slice();
+    for (let i = a.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [a[i], a[j]] = [a[j], a[i]];
+    }
+    return a;
   }
 
   function toggleUnit(id) {
@@ -114,17 +162,49 @@
   }
 
   function refreshSetup() {
-    document.querySelectorAll('.unit-card').forEach((c) => c.classList.toggle('selected', state.selected.has(c.dataset.id)));
-    $('#selected-count').textContent = `Selected ${state.selected.size} / ${MAX_STACKS}`;
+    document.querySelectorAll('#faction-tabs .tab').forEach((t) => t.classList.toggle('active', t.dataset.faction === state.faction));
+    document.querySelectorAll('.unit-card').forEach((c) => {
+      c.classList.toggle('selected', state.selected.has(c.dataset.id));
+      c.classList.toggle('full', !state.selected.has(c.dataset.id) && state.selected.size >= MAX_STACKS);
+      c.classList.toggle('hidden', state.faction !== 'all' && c.dataset.faction !== state.faction);
+    });
+    const strip = $('#army-strip');
+    strip.innerHTML = '';
+    const ids = [...state.selected];
+    for (let i = 0; i < MAX_STACKS; i++) {
+      const slot = document.createElement('div');
+      slot.className = 'army-slot';
+      if (ids[i]) {
+        const def = Units.BY_ID[ids[i]];
+        slot.appendChild(portraitCanvas(def.id, 'player', 96));
+        slot.title = `${def.name} — click to remove`;
+        const n = document.createElement('span');
+        n.className = 'n';
+        n.textContent = def.stack;
+        slot.appendChild(n);
+        slot.addEventListener('click', () => toggleUnit(def.id));
+      } else {
+        slot.classList.add('empty');
+      }
+      strip.appendChild(slot);
+    }
+    $('#selected-count').textContent = `${state.selected.size} / ${MAX_STACKS}`;
     $('#btn-start').disabled = state.selected.size === 0;
   }
 
+  function armyValue(army) {
+    return army.reduce((sum, s) => sum + Units.BY_ID[s.type].value * (s.count != null ? s.count : Units.BY_ID[s.type].stack), 0);
+  }
+
+  // Random enemy types with stack sizes scaled so the total army value matches the player's.
   function makeArmies() {
-    const player = Units.UNITS.filter((u) => state.selected.has(u.id)).map((u) => ({ type: u.id }));
+    const player = [...state.selected].map((id) => ({ type: id, count: Units.BY_ID[id].stack }));
     let ai = player.map((s) => ({ ...s }));
     if (state.enemyMode === 'random') {
-      const pool = Units.UNITS.map((u) => u.id).sort(() => Math.random() - 0.5).slice(0, player.length);
-      ai = Units.UNITS.filter((u) => pool.includes(u.id)).map((u) => ({ type: u.id }));
+      const types = shuffle(Units.UNITS.map((u) => u.id)).slice(0, player.length);
+      ai = types.map((type) => ({ type, count: Units.BY_ID[type].stack }));
+      const factor = armyValue(player) / armyValue(ai);
+      ai = ai.map((s) => ({ type: s.type, count: Math.max(1, Math.round(s.count * factor)) }));
     }
     return { player, ai };
   }
@@ -456,10 +536,18 @@
     log.scrollTop = log.scrollHeight;
   }
 
+  function statusHtml(u) {
+    const st = [];
+    if (u.stunned) st.push(`💫 ${u.stunned}: skips next turn`);
+    if (state.battle && B.isBound(state.battle, u)) st.push('🌿 Bound: cannot move');
+    if (u.reborn) st.push('🔥 Already reborn');
+    return st.length ? `<div class="status">${st.join('<br>')}</div>` : '';
+  }
+
   function showInfo(u) {
     if (!u) return;
     const side = u.side === 'player' ? 'Your' : 'Enemy';
-    $('#info').innerHTML = `<h4>${side} ${u.def.name}${badge(u.def)}</h4>${statsHtml(u.def, u)}`;
+    $('#info').innerHTML = `<h4>${side} ${u.def.name}${badge(u.def)}</h4>${statsHtml(u.def, u)}${statusHtml(u)}${perksHtml(u.def, false)}`;
   }
 
   function showUnitCard(u, x, y) {
@@ -471,7 +559,7 @@
     Sprites.portrait(pc, u.type, u.side);
     card.appendChild(pc);
     const body = document.createElement('div');
-    body.innerHTML = `<div class="desc">${u.def.description}</div>${statsHtml(u.def, u)}`;
+    body.innerHTML = `<div class="desc">${u.def.description}</div>${statsHtml(u.def, u)}${statusHtml(u)}${perksHtml(u.def, true)}`;
     card.appendChild(body);
     card.classList.remove('hidden');
     const w = card.offsetWidth;

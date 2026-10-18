@@ -498,29 +498,59 @@
     shape(ctx, ell(28, -60, 6, 3, -1.1), t.main, 1);
   }
 
-  const DRAW = { pikeman, archer, griffin, swordsman, monk, mage, cavalier, dragon };
-  const SCALE = { pikeman: 1, archer: 1, griffin: 1.08, swordsman: 1, monk: 1, mage: 1, cavalier: 1.12, dragon: 1.3 };
+  // Registry: id -> { draw, scale, portraitSize, portraitX }.
+  // scale: battlefield size multiplier (1 = human-sized).
+  // portraitSize: local units visible in a portrait's height (120 human, 175 dragon).
+  // portraitX: horizontal anchor of the feet in the portrait, 0..1.
+  const REGISTRY = {};
 
-  // Sprite box in local units: width 200, height 160, feet at (100, 145).
-  const BOX_W = 200;
-  const BOX_H = 160;
-  const FOOT_X = 100;
-  const FOOT_Y = 145;
+  function register(id, draw, opts = {}) {
+    REGISTRY[id] = {
+      draw,
+      scale: opts.scale || 1,
+      portraitSize: opts.portraitSize || 120,
+      portraitX: opts.portraitX != null ? opts.portraitX : 0.45,
+    };
+  }
+
+  function has(id) {
+    return !!REGISTRY[id];
+  }
+
+  register('pikeman', pikeman);
+  register('archer', archer);
+  register('griffin', griffin, { scale: 1.08, portraitSize: 135, portraitX: 0.55 });
+  register('swordsman', swordsman);
+  register('monk', monk);
+  register('mage', mage);
+  register('cavalier', cavalier, { scale: 1.12, portraitSize: 150, portraitX: 0.42 });
+  register('dragon', dragon, { scale: 1.3, portraitSize: 175, portraitX: 0.58 });
+
+  // Sprite box in local units: width 240, height 170, feet at (120, 150).
+  const BOX_W = 240;
+  const BOX_H = 170;
+  const FOOT_X = 120;
+  const FOOT_Y = 150;
 
   const cache = new Map();
+
+  function entryFor(type) {
+    return REGISTRY[type] || REGISTRY.pikeman;
+  }
 
   // Returns a cached canvas of the sprite at the given pixels-per-unit scale.
   function get(type, side, ppu) {
     const k = `${type}|${side}|${ppu.toFixed(3)}`;
     if (cache.has(k)) return cache.get(k);
-    const s = ppu * SCALE[type];
+    const e = entryFor(type);
+    const s = ppu * e.scale;
     const c = document.createElement('canvas');
     c.width = Math.ceil(BOX_W * s);
     c.height = Math.ceil(BOX_H * s);
     const ctx = c.getContext('2d');
     ctx.translate(FOOT_X * s, FOOT_Y * s);
     ctx.scale(s, s);
-    DRAW[type](ctx, TEAMS[side]);
+    e.draw(ctx, TEAMS[side]);
     const entry = { canvas: c, footX: FOOT_X * s, footY: FOOT_Y * s };
     cache.set(k, entry);
     return entry;
@@ -545,7 +575,7 @@
     cache.clear();
   }
 
-  // Draws a sprite into a small square portrait canvas.
+  // Draws a sprite into a portrait canvas.
   function portrait(canvas, type, side) {
     const ctx = canvas.getContext('2d');
     const w = canvas.width;
@@ -556,15 +586,15 @@
     bg.addColorStop(1, '#22301a');
     ctx.fillStyle = bg;
     ctx.fillRect(0, 0, w, h);
-    const size = { dragon: 175, cavalier: 150, griffin: 135 }[type] || 120;
-    const s = h / size;
+    const e = entryFor(type);
+    const s = h / e.portraitSize;
     ctx.save();
-    const cx = { dragon: 0.58, cavalier: 0.42, griffin: 0.55 }[type] || 0.45;
-    ctx.translate(w * cx, h * 0.97);
+    ctx.translate(w * e.portraitX, h * 0.97);
     ctx.scale(s, s);
-    DRAW[type](ctx, TEAMS[side]);
+    e.draw(ctx, TEAMS[side]);
     ctx.restore();
   }
 
-  BH.Sprites = { get, tinted, portrait, clearCache, TEAMS, SCALE };
+  BH.SpriteKit = { OUT, SKIN, SKIN_D, lg, rg, shape, poly, ell, limb, stick, head, steel, legs };
+  BH.Sprites = { get, tinted, portrait, clearCache, register, has, TEAMS };
 })(typeof window !== 'undefined' ? window : globalThis);

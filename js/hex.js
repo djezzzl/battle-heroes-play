@@ -45,6 +45,18 @@
     return Math.max(Math.abs(ca.x - cb.x), Math.abs(ca.y - cb.y), Math.abs(ca.z - cb.z));
   }
 
+  function fromCube(x, z) {
+    return { col: x + (z - (z & 1)) / 2, row: z };
+  }
+
+  // The hex continuing the straight line from `from` through `to` (one step beyond `to`).
+  function behind(from, to) {
+    const a = toCube(from.col, from.row);
+    const b = toCube(to.col, to.row);
+    const h = fromCube(2 * b.x - a.x, 2 * b.z - a.z);
+    return inBounds(h.col, h.row) ? h : null;
+  }
+
   function isAdjacent(a, b) {
     return distance(a, b) === 1;
   }
@@ -94,7 +106,7 @@
   }
 
   BH.Hex = {
-    COLS, ROWS, key, parseKey, inBounds, neighbors, distance, isAdjacent,
+    COLS, ROWS, key, parseKey, inBounds, neighbors, distance, isAdjacent, behind,
     makeLayout, hexToPixel, pixelToHex, corners, allHexes,
   };
 })(typeof window !== 'undefined' ? window : globalThis);

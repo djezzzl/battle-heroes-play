@@ -16,16 +16,22 @@
       <div class="panel setup-panel">
         <h1>Battle Heroes</h1>
         <p class="subtitle">Muster your army &mdash; choose up to 7 creature stacks</p>
+        <div id="faction-tabs"></div>
         <div id="unit-grid"></div>
-        <div class="setup-footer">
-          <div class="enemy-choice">
-            <span>Enemy army:</span>
-            <button class="toggle active" data-enemy="mirror">Mirror</button>
-            <button class="toggle" data-enemy="random">Random</button>
-          </div>
-          <div id="selected-count"></div>
-          <button id="btn-start" class="btn-gold">To Battle!</button>
+      </div>
+      <div class="panel setup-footer">
+        <div class="army">
+          <span class="army-label">Your army <b id="selected-count"></b></span>
+          <div id="army-strip"></div>
+          <button id="btn-random-army" class="toggle" title="Pick 7 random units from the current tab">&#127922; Random</button>
+          <button id="btn-clear-army" class="toggle">Clear</button>
         </div>
+        <div class="enemy-choice">
+          <span>Enemy:</span>
+          <button class="toggle active" data-enemy="mirror" title="Same army as yours">Mirror</button>
+          <button class="toggle" data-enemy="random" title="Random units, equal total strength">Random</button>
+        </div>
+        <button id="btn-start" class="btn-gold">To Battle!</button>
       </div>
     </section>
 
@@ -57,6 +63,9 @@
   <script src="js/battle.js"></script>
   <script src="js/ai.js"></script>
   <script src="js/sprites.js"></script>
+  <script src="js/sprites/good.js"></script>
+  <script src="js/sprites/evil.js"></script>
+  <script src="js/sprites/wild.js"></script>
   <script src="js/renderer.js"></script>
   <script src="js/game.js"></script>
 </body>

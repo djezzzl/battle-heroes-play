@@ -16,35 +16,42 @@
     return value;
   }
 
-  function shotScore(battle, unit, target) {
-    const longShot = Hex.distance(unit, target) > 10;
-    let score = damageValue(target, B.expectedDamage(unit, target, { half: longShot }));
-    if (unit.def.attackType === 'splash') {
-      for (const v of B.splashVictims(battle, unit, target)) {
-        score += damageValue(v, B.expectedDamage(unit, v, { half: longShot }));
-      }
+  // Expected value of one strike from `pos` (enemy damage minus friendly fire), and damage to the target.
+  function strikeValue(battle, unit, target, { ranged, pos, moved = 0 }) {
+    const ctx = { ranged, moved, distance: Hex.distance(pos, target) };
+    let score = 0;
+    let mainDmg = 0;
+    for (const v of B.strikeVictims(battle, unit, target, { ranged, pos })) {
+      const dmg = B.expectedDamage(unit, v, ctx);
+      if (v === target) mainDmg = dmg;
+      score += (v.side === unit.side ? -1 : 1) * damageValue(v, dmg);
     }
-    return score;
+    return { score, mainDmg };
   }
 
-  function meleeScore(battle, unit, target, from) {
-    const half = unit.def.ranged;
-    const dmg = B.expectedDamage(unit, target, { half });
-    let score = damageValue(target, dmg);
-    if (unit.def.attackType === 'splash') {
-      for (const n of Hex.neighbors(target.col, target.row)) {
-        const v = B.unitAt(battle, n.col, n.row);
-        if (v && v.side !== unit.side && v !== target) score += damageValue(v, B.expectedDamage(unit, v));
-      }
-    }
-    // Expected retaliation from the survivors.
-    const remainingHp = B.totalHp(target) - dmg;
-    if (remainingHp > 0 && target.retaliationsLeft > 0) {
-      const survivors = { ...target, count: Math.ceil(remainingHp / target.def.hp) };
-      const ret = B.expectedDamage(survivors, unit, { half: target.def.ranged });
-      score -= damageValue(unit, ret) * 0.6;
-    }
-    // Prefer attack hexes with fewer extra enemies around (less exposure).
+  function retaliationPenalty(unit, target, dmgToTarget) {
+    if (target.retaliationsLeft <= 0 || target.stunned || unit.def.perks.noRetaliation) return 0;
+    const remainingHp = B.totalHp(target) - dmgToTarget;
+    if (remainingHp <= 0) return 0;
+    const survivors = { ...target, count: Math.ceil(remainingHp / target.def.hp) };
+    const ret = B.expectedDamage(survivors, unit, { ranged: false });
+    return damageValue(unit, ret) * 0.6;
+  }
+
+  function shotScore(battle, unit, target) {
+    const { score } = strikeValue(battle, unit, target, { ranged: true, pos: unit });
+    return score * (unit.def.perks.doubleShot && unit.shots > 1 ? 1.8 : 1);
+  }
+
+  function meleeScore(battle, unit, target, from, moved) {
+    const P = unit.def.perks;
+    const { score: base, mainDmg } = strikeValue(battle, unit, target, { ranged: false, pos: from, moved });
+    let score = base;
+    if (P.doubleStrike) score *= 1.8;
+    if (P.lifeDrain && !target.def.perks.undead) score += Math.min(mainDmg, B.totalHp(target)) / unit.def.hp * unit.def.value * 0.5;
+    if (target.def.perks.fireShield) score -= damageValue(unit, mainDmg * target.def.perks.fireShield);
+    score -= retaliationPenalty(unit, target, mainDmg);
+    // Prefer attack hexes with fewer extra enemies around (less exposure), unless the attack benefits from them.
     const exposure = Hex.neighbors(from.col, from.row)
       .map((h) => B.unitAt(battle, h.col, h.row))
       .filter((u) => u && u.side !== unit.side && u !== target).length;
@@ -69,11 +76,15 @@
     for (const { target, froms } of B.meleeTargets(battle, unit, reach)) {
       for (const from of froms) {
         const stay = from.col === unit.col && from.row === unit.row;
-        const s = meleeScore(battle, unit, target, from) + (stay ? 0.1 : 0);
+        const path = stay ? [] : reach.get(Hex.key(from.col, from.row));
+        const moved = stay ? 0 : unit.def.flying ? Hex.distance(unit, from) : path.length;
+        const s = meleeScore(battle, unit, target, from, moved) + (stay ? 0.1 : 0);
         if (!best || s > best.score) best = { score: s, target, from };
       }
     }
-    if (best) return { type: 'melee', targetId: best.target.id, from: { col: best.from.col, row: best.from.row } };
+    if (best && best.score > -stackValue(unit) * 0.5) {
+      return { type: 'melee', targetId: best.target.id, from: { col: best.from.col, row: best.from.row } };
+    }
 
     // Shooters out of ammo or melee units with nothing in reach: close in on the juiciest target.
     let bestMove = null;
@@ -91,6 +102,7 @@
       const here = enemies.reduce((m, e) => Math.max(m, stackValue(e) / (1 + Hex.distance(unit, e) ** 2)), 0);
       if (bestMove.score > here) return { type: 'move', to: bestMove.to };
     }
+    if (best) return { type: 'melee', targetId: best.target.id, from: { col: best.from.col, row: best.from.row } };
     return { type: 'defend' };
   }
 
