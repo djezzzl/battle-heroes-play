@@ -20,8 +20,14 @@
         <div id="unit-grid"></div>
       </div>
       <aside id="army-panel" class="panel">
-        <h2>Your Army</h2>
-        <div class="budget">
+        <h2 id="army-title">Your Army</h2>
+        <div id="opponent-choice" class="enemy-choice">
+          <span>Opponent:</span>
+          <button class="toggle" data-opponent="computer" title="Fight the computer">&#129302; Computer</button>
+          <button class="toggle" data-opponent="human" title="Hot-seat: two players take turns on this device">&#128101; Player 2</button>
+        </div>
+        <div id="budget-fixed" class="hidden"></div>
+        <div class="budget" id="budget-edit">
           <div class="budget-label">Gold for this battle</div>
           <div id="budget-presets"></div>
           <label class="budget-custom">Custom: <input id="budget-input" type="number" min="100" step="500" inputmode="numeric"></label>
@@ -33,23 +39,29 @@
           <button id="btn-random-army" class="toggle" title="Random army from the current tab, spending the budget">&#127922; Random army</button>
           <button id="btn-clear-army" class="toggle">Clear</button>
         </div>
-        <div class="enemy-choice">
+        <div class="enemy-choice" id="enemy-choice">
           <span>Enemy:</span>
           <button class="toggle" data-enemy="mirror" title="Same army as yours">Mirror</button>
           <button class="toggle" data-enemy="random" title="Random army spending at least 97% of the budget">Random</button>
+        </div>
+        <div class="enemy-choice hidden" id="p2-choice">
+          <span>Player 2:</span>
+          <button class="toggle" data-p2="mirror" title="Player 2 gets the same army as Player 1">Mirror my army</button>
+          <button class="toggle" data-p2="build" title="Player 2 builds their own army with the same budget">Builds own army</button>
         </div>
         <div class="panel-bottom">
           <div class="audio-toggles">
             <button class="toggle audio-music" title="Music on/off (M)">&#127925;</button>
             <button class="toggle audio-sfx" title="Sound effects on/off (S)">&#128266;</button>
           </div>
+          <button id="btn-back" class="toggle hidden" title="Back to Player 1's army">&#9664; Back</button>
           <button id="btn-start" class="btn-gold">To Battle!</button>
         </div>
       </aside>
     </section>
 
     <section id="battle" class="screen hidden">
-      <div id="field-wrap"><canvas id="field"></canvas></div>
+      <div id="field-wrap"><canvas id="field"></canvas><div id="turn-banner" class="hidden"></div></div>
       <div id="hud">
         <div id="queue"></div>
         <div id="controls">

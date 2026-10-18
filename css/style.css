@@ -328,3 +328,27 @@ button { font-family: var(--font); cursor: pointer; }
   #army-panel { flex: 0 0 auto; max-height: 48%; }
   #army-list { min-height: 60px; }
 }
+
+/* ---------------- hot-seat ---------------- */
+
+#army-panel.p2 { border-color: #3a6ad0; box-shadow: inset 0 0 0 1px #6a9af0, inset 0 0 24px rgba(0,0,0,0.7), 0 6px 30px rgba(0,0,0,0.8); }
+#army-panel.p2 h2 { color: #9cc0ff; }
+#army-panel.p2 .row-portrait { border-color: #3a6ad0; }
+#army-panel.p2 #gold-fill { background: linear-gradient(90deg, #22408a, #8cb4ff); }
+#budget-fixed { color: #d8c79a; font-size: 14px; }
+.p2-name { color: #9cc0ff; }
+
+#turn-banner {
+  position: absolute; top: 8px; left: 50%; transform: translateX(-50%);
+  padding: 6px 18px; border-radius: 6px; font-size: 18px; font-weight: bold; white-space: nowrap;
+  color: #fff; text-shadow: 0 1px 2px #000; pointer-events: none;
+  border: 2px solid var(--gold); box-shadow: 0 3px 10px rgba(0,0,0,0.6);
+}
+#turn-banner.turn-player { background: linear-gradient(180deg, #c8403a, #6a1410); }
+#turn-banner.turn-ai { background: linear-gradient(180deg, #3a6ad0, #12306a); }
+#turn-banner.flash { animation: banner-flash 0.9s ease-out; }
+@keyframes banner-flash {
+  0% { transform: translateX(-50%) scale(1.35); box-shadow: 0 0 30px var(--gold); }
+  100% { transform: translateX(-50%) scale(1); }
+}
+#modal.opaque { background: radial-gradient(ellipse at center, #2a3a1a, #0c0804 80%); }

@@ -10,7 +10,12 @@
   const fmt = (n) => Math.round(n).toLocaleString('en-US');
 
   const state = {
-    army: [],
+    p1Army: [],
+    p2Army: [],
+    editing: 1, // which player's army the builder is editing
+    opponent: 'computer', // 'computer' | 'human' (hot-seat)
+    hotseatMode: 'build', // 'mirror' | 'build' (Player 2 builds own army)
+    resultShown: false,
     budget: Army.DEFAULT_BUDGET,
     faction: 'all',
     enemyMode: 'mirror',
@@ -95,17 +100,33 @@
     return `<div class="perk-chips">${list.map((p) => `<span class="perk" title="${p.desc}">${p.label}</span>`).join('')}</div>`;
   }
 
+  // The army currently being edited in the builder.
+  function ed() {
+    return state.editing === 2 ? state.p2Army : state.p1Army;
+  }
+
+  function setEd(army) {
+    if (state.editing === 2) state.p2Army = army;
+    else state.p1Army = army;
+  }
+
+  function cleanArmy(list) {
+    return (list || [])
+      .filter((s) => s && Units.BY_ID[s.type] && s.count > 0)
+      .slice(0, MAX_STACKS)
+      .map((s) => ({ type: s.type, count: Math.floor(s.count) }));
+  }
+
   function loadSetup() {
     try {
       const saved = JSON.parse(localStorage.getItem(SETUP_KEY) || 'null');
       if (!saved) return false;
       if (saved.budget > 0) state.budget = Math.round(saved.budget);
       if (saved.enemyMode === 'random' || saved.enemyMode === 'mirror') state.enemyMode = saved.enemyMode;
-      state.army = (saved.army || [])
-        .filter((s) => Units.BY_ID[s.type] && s.count > 0)
-        .slice(0, MAX_STACKS)
-        .map((s) => ({ type: s.type, count: Math.floor(s.count) }));
-      fitArmyToBudget();
+      if (saved.opponent === 'human' || saved.opponent === 'computer') state.opponent = saved.opponent;
+      if (saved.hotseatMode === 'mirror' || saved.hotseatMode === 'build') state.hotseatMode = saved.hotseatMode;
+      state.p1Army = fitToBudget(cleanArmy(saved.army));
+      state.p2Army = fitToBudget(cleanArmy(saved.army2));
       return true;
     } catch (e) {
       return false;
@@ -114,24 +135,27 @@
 
   function saveSetup() {
     try {
-      localStorage.setItem(SETUP_KEY, JSON.stringify({ budget: state.budget, army: state.army, enemyMode: state.enemyMode }));
+      localStorage.setItem(SETUP_KEY, JSON.stringify({
+        budget: state.budget, army: state.p1Army, army2: state.p2Army,
+        enemyMode: state.enemyMode, opponent: state.opponent, hotseatMode: state.hotseatMode,
+      }));
     } catch (e) {
       // storage unavailable: nothing to persist
     }
   }
 
-  // Shrinks the army proportionally when the budget is lowered below its cost.
-  function fitArmyToBudget() {
-    const total = Army.totalCost(state.army);
-    if (total <= state.budget) return;
+  // Shrinks an army proportionally when the budget is below its cost.
+  function fitToBudget(army) {
+    const total = Army.totalCost(army);
+    if (total <= state.budget) return army;
     const f = state.budget / total;
-    for (const s of state.army) s.count = Math.floor(s.count * f);
-    state.army = state.army.filter((s) => s.count > 0);
-    while (Army.totalCost(state.army) > state.budget && state.army.length) {
-      const s = state.army.reduce((a, b) => (Army.costOf(a.type) >= Army.costOf(b.type) ? a : b));
+    let out = army.map((s) => ({ type: s.type, count: Math.floor(s.count * f) })).filter((s) => s.count > 0);
+    while (Army.totalCost(out) > state.budget && out.length) {
+      const s = out.reduce((x, y) => (Army.costOf(x.type) >= Army.costOf(y.type) ? x : y));
       s.count -= 1;
-      state.army = state.army.filter((x) => x.count > 0);
+      out = out.filter((x) => x.count > 0);
     }
+    return out;
   }
 
   function buildSetup() {
@@ -160,6 +184,7 @@
       pc.width = 240;
       pc.height = 150;
       Sprites.portrait(pc, def.id, 'player');
+      pc.dataset.side = 'player';
       card.appendChild(pc);
       const price = document.createElement('div');
       price.className = 'price-tag';
@@ -193,35 +218,82 @@
         refreshSetup();
       })
     );
+    document.querySelectorAll('[data-opponent]').forEach((b) =>
+      b.addEventListener('click', () => {
+        state.opponent = b.dataset.opponent;
+        saveSetup();
+        refreshSetup();
+      })
+    );
+    document.querySelectorAll('[data-p2]').forEach((b) =>
+      b.addEventListener('click', () => {
+        state.hotseatMode = b.dataset.p2;
+        saveSetup();
+        refreshSetup();
+      })
+    );
+    $('#btn-back').addEventListener('click', () => setEditing(1));
     $('#btn-random-army').addEventListener('click', () => {
       const pool = Units.UNITS.filter((u) => state.faction === 'all' || u.faction === state.faction).map((u) => u.id);
-      state.army = Army.randomArmy(state.budget, Math.random, { pool });
+      setEd(Army.randomArmy(state.budget, Math.random, { pool }));
       changed(true);
     });
     $('#btn-clear-army').addEventListener('click', () => {
-      state.army = [];
+      setEd([]);
       changed(true);
     });
     $('#btn-start').addEventListener('click', () => {
-      if (Army.isValid(state.army, state.budget)) startBattle(makeArmies());
+      if (!Army.isValid(ed(), state.budget)) return;
+      if (state.editing === 1 && state.opponent === 'human' && state.hotseatMode === 'build') showHandoff();
+      else startBattle(makeArmies());
     });
 
-    if (!loadSetup()) state.army = Army.randomArmy(state.budget, Math.random, { pool: ['pikeman', 'archer', 'griffin', 'swordsman', 'monk', 'cavalier'] });
+    if (!loadSetup()) state.p1Army = Army.randomArmy(state.budget, Math.random, { pool: ['pikeman', 'archer', 'griffin', 'swordsman', 'monk', 'cavalier'] });
     changed(true);
+  }
+
+  // Switches the builder between Player 1 (red) and Player 2 (blue).
+  function setEditing(n) {
+    state.editing = n;
+    const side = n === 2 ? 'ai' : 'player';
+    document.querySelectorAll('.unit-card .portrait').forEach((c) => {
+      if (c.dataset.side !== side) {
+        Sprites.portrait(c, c.closest('.unit-card').dataset.id, side);
+        c.dataset.side = side;
+      }
+    });
+    if (n === 2 && !state.p2Army.length) state.p2Army = Army.randomArmy(state.budget);
+    $('#unit-grid').scrollTop = 0;
+    $('.setup-panel').scrollTop = 0;
+    changed(true);
+  }
+
+  function showHandoff() {
+    showModal(`<h2>Player 2's turn</h2>
+      <p>Pass the device to <b class="p2-name">Player 2 (Blue)</b>.<br>Player 1, no peeking at the enemy's army!</p>
+      <p class="gold-compare">Budget: 💰 ${fmt(state.budget)}</p>
+      <div class="modal-buttons"><button class="btn-gold" id="m-p2">I'm Player 2 — build my army</button>
+      <button class="btn-gold" id="m-cancel">Back</button></div>`, { opaque: true });
+    $('#m-p2').onclick = () => {
+      hideModal();
+      setEditing(2);
+    };
+    $('#m-cancel').onclick = hideModal;
   }
 
   function setBudget(b) {
     if (!Number.isFinite(b) || b <= 0) b = Army.DEFAULT_BUDGET;
     state.budget = Math.min(10000000, Math.max(100, Math.round(b)));
-    fitArmyToBudget();
+    state.p1Army = fitToBudget(state.p1Army);
+    state.p2Army = fitToBudget(state.p2Army);
     changed(true);
   }
 
   function toggleUnit(id) {
-    const i = state.army.findIndex((s) => s.type === id);
-    if (i >= 0) state.army.splice(i, 1);
-    else if (state.army.length < MAX_STACKS && Army.maxAffordable(id, state.budget, state.army) > 0) {
-      state.army.push({ type: id, count: Army.defaultCount(id, state.budget, state.army) });
+    const i = ed().findIndex((s) => s.type === id);
+    if (i >= 0) ed().splice(i, 1);
+    else if (ed().length < MAX_STACKS && Army.maxAffordable(id, state.budget, ed()) > 0) {
+      ed().push({ type: id, count: Army.defaultCount(id, state.budget, ed()) });
     } else return;
     changed(true);
   }
@@ -234,25 +306,25 @@
   }
 
   function setCount(type, n) {
-    const s = state.army.find((x) => x.type === type);
+    const s = ed().find((x) => x.type === type);
     if (!s) return;
-    const max = Army.maxAffordable(type, state.budget, state.army);
+    const max = Army.maxAffordable(type, state.budget, ed());
     s.count = Math.max(1, Math.min(max, Math.floor(n) || 1));
   }
 
   function buildArmyList() {
     const list = $('#army-list');
     list.innerHTML = '';
-    if (!state.army.length) {
+    if (!ed().length) {
       list.innerHTML = '<div class="army-empty">Tap creatures on the left to hire them.</div>';
       return;
     }
-    for (const s of state.army) {
+    for (const s of ed()) {
       const def = Units.BY_ID[s.type];
       const row = document.createElement('div');
       row.className = 'army-row';
       row.dataset.type = s.type;
-      const pc = portraitCanvas(def.id, 'player', 96);
+      const pc = portraitCanvas(def.id, state.editing === 2 ? 'ai' : 'player', 96);
       pc.className = 'row-portrait';
       row.appendChild(pc);
       const main = document.createElement('div');
@@ -277,7 +349,7 @@
         })
       );
       main.querySelector('.max').addEventListener('click', () => {
-        setCount(s.type, Army.maxAffordable(s.type, state.budget, state.army));
+        setCount(s.type, Army.maxAffordable(s.type, state.budget, ed()));
         changed(false);
       });
       main.querySelector('.count').addEventListener('change', (e) => {
@@ -293,31 +365,45 @@
   }
 
   function refreshSetup() {
-    const spent = Army.totalCost(state.army);
+    const spent = Army.totalCost(ed());
     const left = state.budget - spent;
     document.querySelectorAll('#faction-tabs .tab').forEach((t) => t.classList.toggle('active', t.dataset.faction === state.faction));
     document.querySelectorAll('#budget-presets .preset').forEach((b) => b.classList.toggle('active', +b.dataset.budget === state.budget));
     if (document.activeElement !== $('#budget-input')) $('#budget-input').value = state.budget;
     document.querySelectorAll('[data-enemy]').forEach((x) => x.classList.toggle('active', x.dataset.enemy === state.enemyMode));
+    document.querySelectorAll('[data-opponent]').forEach((x) => x.classList.toggle('active', x.dataset.opponent === state.opponent));
+    document.querySelectorAll('[data-p2]').forEach((x) => x.classList.toggle('active', x.dataset.p2 === state.hotseatMode));
+    const p2 = state.editing === 2;
+    const hotseat = state.opponent === 'human';
+    $('#army-panel').classList.toggle('p2', p2);
+    $('#army-title').textContent = p2 ? 'Player 2 · Blue Army' : hotseat ? 'Player 1 · Red Army' : 'Your Army';
+    $('#opponent-choice').classList.toggle('hidden', p2);
+    $('#budget-edit').classList.toggle('hidden', p2);
+    $('#budget-fixed').classList.toggle('hidden', !p2);
+    $('#budget-fixed').innerHTML = `Gold for this battle: <b>💰 ${fmt(state.budget)}</b> (set by Player 1)`;
+    $('#enemy-choice').classList.toggle('hidden', p2 || hotseat);
+    $('#p2-choice').classList.toggle('hidden', p2 || !hotseat);
+    $('#btn-back').classList.toggle('hidden', !p2);
+    $('#btn-start').textContent = !p2 && hotseat && state.hotseatMode === 'build' ? 'Next: Player 2 ▶' : 'To Battle!';
 
-    const inArmy = new Set(state.army.map((s) => s.type));
+    const inArmy = new Set(ed().map((s) => s.type));
     document.querySelectorAll('.unit-card').forEach((c) => {
       const id = c.dataset.id;
-      const max = Army.maxAffordable(id, state.budget, state.army);
+      const max = Army.maxAffordable(id, state.budget, ed());
       const selected = inArmy.has(id);
       c.classList.toggle('selected', selected);
-      c.classList.toggle('full', !selected && state.army.length >= MAX_STACKS);
+      c.classList.toggle('full', !selected && ed().length >= MAX_STACKS);
       c.classList.toggle('unaffordable', !selected && max < 1);
       c.classList.toggle('hidden', state.faction !== 'all' && c.dataset.faction !== state.faction);
       c.querySelector('.afford').textContent = selected
-        ? `In army: ${state.army.find((s) => s.type === id).count}`
+        ? `In army: ${ed().find((s) => s.type === id).count}`
         : max < 1 ? 'Not enough gold' : `You can afford ${fmt(max)}`;
     });
 
     for (const row of document.querySelectorAll('.army-row')) {
-      const s = state.army.find((x) => x.type === row.dataset.type);
+      const s = ed().find((x) => x.type === row.dataset.type);
       if (!s) continue;
-      const max = Army.maxAffordable(s.type, state.budget, state.army);
+      const max = Army.maxAffordable(s.type, state.budget, ed());
       const input = row.querySelector('.count');
       if (document.activeElement !== input) input.value = s.count;
       input.max = max;
@@ -328,17 +414,65 @@
     }
 
     $('#gold-fill').style.width = `${Math.min(100, (spent / state.budget) * 100)}%`;
-    $('#gold-text').innerHTML = `Spent <b>${fmt(spent)}</b> of ${fmt(state.budget)} · <b>${fmt(left)}</b> left · ${state.army.length}/${MAX_STACKS} stacks`;
-    $('#btn-start').disabled = !Army.isValid(state.army, state.budget);
+    $('#gold-text').innerHTML = `Spent <b>${fmt(spent)}</b> of ${fmt(state.budget)} · <b>${fmt(left)}</b> left · ${ed().length}/${MAX_STACKS} stacks`;
+    $('#btn-start').disabled = !Army.isValid(ed(), state.budget);
   }
 
   function makeArmies() {
-    const player = state.army.map((s) => ({ type: s.type, count: s.count }));
-    const ai = state.enemyMode === 'random' ? Army.randomArmy(state.budget) : player.map((s) => ({ ...s }));
-    return { player, ai, budget: state.budget };
+    const copy = (army) => army.map((s) => ({ type: s.type, count: s.count }));
+    const player = copy(state.p1Army);
+    let ai;
+    if (state.opponent === 'human') ai = state.hotseatMode === 'mirror' ? copy(player) : copy(state.p2Army);
+    else ai = state.enemyMode === 'random' ? Army.randomArmy(state.budget) : copy(player);
+    return { player, ai, budget: state.budget, opponent: state.opponent, enemyMode: state.enemyMode };
   }
 
   // ------------------------------------------------------------ battle flow
+
+  const isHotseat = () => !!state.armies && state.armies.opponent === 'human';
+
+  // Who decides for a side: a person at this device, or the computer (also when Auto is on).
+  function computerControls(side) {
+    return (side === 'ai' && !isHotseat()) || state.auto[side];
+  }
+
+  // The human side the HUD buttons (Auto, Retreat) act for right now.
+  function activeHumanSide() {
+    if (!isHotseat()) return 'player';
+    const u = state.battle && B.current(state.battle);
+    return u ? u.side : 'player';
+  }
+
+  function playerName(side) {
+    if (isHotseat()) return side === 'player' ? 'Player 1 (Red)' : 'Player 2 (Blue)';
+    return side === 'player' ? 'You' : 'Computer';
+  }
+
+  // Short owner label for a unit: "Your"/"Enemy" vs the computer, "Red"/"Blue" in hot-seat.
+  function ownerLabel(side) {
+    if (isHotseat()) return side === 'player' ? 'Red' : 'Blue';
+    return side === 'player' ? 'Your' : 'Enemy';
+  }
+
+  function refreshAutoButton() {
+    $('#btn-auto').classList.toggle('on', !!state.auto[activeHumanSide()]);
+  }
+
+  function showTurnBanner(u) {
+    const el = $('#turn-banner');
+    if (!isHotseat() || !u || state.battle.winner) {
+      el.classList.add('hidden');
+      return;
+    }
+    const changedSide = el.dataset.side !== u.side;
+    el.dataset.side = u.side;
+    el.className = `turn-${u.side}`;
+    el.textContent = `${u.side === 'player' ? '🔴' : '🔵'} ${playerName(u.side)} — ${u.def.name}`;
+    if (changedSide) {
+      void el.offsetWidth; // restart the flash animation
+      el.classList.add('flash');
+    }
+  }
 
   function startBattle(armies) {
     state.armies = armies;
@@ -355,7 +489,9 @@
     state.busy = false;
     state.pending = null;
     state.logShown = 0;
-    state.auto = false;
+    state.auto = { player: false, ai: false };
+    state.resultShown = false;
+    $('#turn-banner').dataset.side = '';
     $('#btn-auto').classList.remove('on');
     $('#log').innerHTML = '';
     state.renderer.setBattle(battle);
@@ -363,7 +499,7 @@
   }
 
   function speed() {
-    return state.auto ? 1.6 : 1;
+    return state.auto.player || state.auto.ai ? 1.6 : 1;
   }
 
   async function nextTurn() {
@@ -378,12 +514,14 @@
     }
     const u = B.current(battle);
     showInfo(u);
-    if (u.side === 'ai' || state.auto) {
+    showTurnBanner(u);
+    refreshAutoButton();
+    if (computerControls(u.side)) {
       setControls(false);
       state.renderer.setHighlight({ activeId: u.id });
-      await state.renderer.wait(u.side === 'ai' ? 420 : 200);
-      if (state.battle !== battle || state.busy) return;
-      if (u.side === 'player' && !state.auto) return preparePlayerTurn(u);
+      await state.renderer.wait(state.auto[u.side] ? 200 : 420);
+      if (state.battle !== battle || state.busy || battle.winner) return;
+      if (!computerControls(u.side)) return preparePlayerTurn(u);
       await execute(AI.chooseAction(battle, u));
     } else {
       preparePlayerTurn(u);
@@ -430,9 +568,9 @@
 
   function isPlayerTurn() {
     const b = state.battle;
-    if (!b || b.winner || state.busy || state.auto) return false;
+    if (!b || b.winner || state.busy) return false;
     const u = B.current(b);
-    return !!u && u.side === 'player' && state.opts && state.opts.unit === u;
+    return !!u && !computerControls(u.side) && state.opts && state.opts.unit === u;
   }
 
   // Picks which adjacent hex to attack from, based on where in the target hex the pointer is.
@@ -601,21 +739,34 @@
       if (isPlayerTurn()) execute({ type: 'defend' });
     });
     $('#btn-auto').addEventListener('click', () => {
-      state.auto = !state.auto;
-      $('#btn-auto').classList.toggle('on', state.auto);
       const b = state.battle;
-      if (!b || b.winner || state.busy) return;
+      if (!b) return;
+      const side = activeHumanSide();
+      state.auto[side] = !state.auto[side];
+      refreshAutoButton();
+      if (b.winner || state.busy) return;
       const u = B.current(b);
-      if (u && u.side === 'player') {
-        if (state.auto) nextTurn();
+      if (u && u.side === side) {
+        if (state.auto[side]) nextTurn();
         else preparePlayerTurn(u);
       }
     });
     $('#btn-retreat').addEventListener('click', () => {
-      showModal(`<h2>Retreat?</h2><p>Your army will flee the battlefield.</p>
+      const b = state.battle;
+      if (!b || b.winner) return;
+      const side = activeHumanSide();
+      const who = isHotseat() ? `${playerName(side)}'s army` : 'Your army';
+      showModal(`<h2>Retreat?</h2><p>${who} will flee the battlefield.</p>
         <div class="modal-buttons"><button class="btn-gold" id="m-yes">Retreat</button>
         <button class="btn-gold" id="m-no">Keep fighting</button></div>`);
-      $('#m-yes').onclick = () => goToSetup();
+      $('#m-yes').onclick = () => {
+        if (!isHotseat()) return goToSetup();
+        b.winner = side === 'player' ? 'ai' : 'player';
+        b.retreated = side;
+        b.log.push({ text: `${playerName(side)} retreats!`, kind: 'death' });
+        setControls(false);
+        showResult();
+      };
       $('#m-no').onclick = hideModal;
     });
   }
@@ -675,13 +826,12 @@
 
   function showInfo(u) {
     if (!u) return;
-    const side = u.side === 'player' ? 'Your' : 'Enemy';
-    $('#info').innerHTML = `<h4>${side} ${u.def.name}${badge(u.def)}</h4>${statsHtml(u.def, u)}${statusHtml(u)}${perksHtml(u.def, false)}`;
+    $('#info').innerHTML = `<h4>${ownerLabel(u.side)} ${u.def.name}${badge(u.def)}</h4>${statsHtml(u.def, u)}${statusHtml(u)}${perksHtml(u.def, false)}`;
   }
 
   function showUnitCard(u, x, y) {
     const card = $('#unit-card');
-    card.innerHTML = `<h3>${u.side === 'player' ? 'Your' : 'Enemy'} ${u.def.name}${badge(u.def)}</h3>`;
+    card.innerHTML = `<h3>${ownerLabel(u.side)} ${u.def.name}${badge(u.def)}</h3>`;
     const pc = document.createElement('canvas');
     pc.width = 240;
     pc.height = 180;
@@ -701,8 +851,10 @@
     $('#unit-card').classList.add('hidden');
   }
 
-  function showModal(html) {
+  // opaque: fully hide what's behind (e.g. so Player 2 can't see Player 1's army).
+  function showModal(html, { opaque = false } = {}) {
     $('#modal-body').innerHTML = html;
+    $('#modal').classList.toggle('opaque', opaque);
     $('#modal').classList.remove('hidden');
   }
 
@@ -719,23 +871,45 @@
           <span>${u.def.name}: lost <b>${u.initialCount - u.count}</b> of ${u.initialCount}</span></div>`;
       })
       .join('');
-    return `<div><h3>${side === 'player' ? 'Your losses' : 'Enemy losses'}</h3>${rows}</div>`;
+    const title = isHotseat() ? `${playerName(side)} losses` : side === 'player' ? 'Your losses' : 'Enemy losses';
+    return `<div><h3>${title}</h3>${rows}</div>`;
   }
 
   function showResult() {
-    const win = state.battle.winner === 'player';
-    sfx(win ? 'victory' : 'defeat');
-    showModal(`<h2>${win ? 'Victory!' : 'Defeat'}</h2>
-      <p>${win ? 'The enemy army has been destroyed.' : 'Your army has fallen.'} Battle lasted ${state.battle.round} rounds.</p>
-      <p class="gold-compare">Your army: 💰 ${fmt(Army.totalCost(state.armies.player))} · Enemy army: 💰 ${fmt(Army.totalCost(state.armies.ai))}</p>
+    if (state.resultShown) return;
+    state.resultShown = true;
+    $('#turn-banner').classList.add('hidden');
+    const b = state.battle;
+    const win = b.winner === 'player';
+    let title;
+    let text;
+    let gold;
+    if (isHotseat()) {
+      const winner = b.winner === 'draw' ? null : b.winner;
+      const loser = winner === 'player' ? 'ai' : 'player';
+      sfx(winner ? 'victory' : 'defeat');
+      title = winner ? `${winner === 'player' ? '🔴' : '🔵'} ${playerName(winner).replace(/ \(.*\)/, '')} wins!` : 'Draw';
+      text = !winner ? 'Both armies have fallen.'
+        : b.retreated ? `${playerName(loser)} retreated.` : `${playerName(loser)}'s army has been destroyed.`;
+      gold = `Player 1: 💰 ${fmt(Army.totalCost(state.armies.player))} · Player 2: 💰 ${fmt(Army.totalCost(state.armies.ai))}`;
+    } else {
+      sfx(win ? 'victory' : 'defeat');
+      title = win ? 'Victory!' : 'Defeat';
+      text = win ? 'The enemy army has been destroyed.' : 'Your army has fallen.';
+      gold = `Your army: 💰 ${fmt(Army.totalCost(state.armies.player))} · Enemy army: 💰 ${fmt(Army.totalCost(state.armies.ai))}`;
+    }
+    showModal(`<h2>${title}</h2>
+      <p>${text} Battle lasted ${b.round} rounds.</p>
+      <p class="gold-compare">${gold}</p>
       <div class="casualties">${casualtiesHtml('player')}${casualtiesHtml('ai')}</div>
       <div class="modal-buttons"><button class="btn-gold" id="m-again">Fight again</button>
       <button class="btn-gold" id="m-setup">Change army</button></div>`);
     // canvases serialized via outerHTML lose their pixels; repaint them
     document.querySelectorAll('#modal-body canvas[data-type]').forEach((c) => Sprites.portrait(c, c.dataset.type, c.dataset.side));
     $('#m-again').onclick = () => {
-      const { player, ai, budget } = state.armies;
-      startBattle({ player, ai: state.enemyMode === 'random' ? Army.randomArmy(budget) : ai, budget });
+      const a = state.armies;
+      const reroll = a.opponent === 'computer' && a.enemyMode === 'random';
+      startBattle({ ...a, ai: reroll ? Army.randomArmy(a.budget) : a.ai });
     };
     $('#m-setup').onclick = goToSetup;
   }
@@ -746,6 +920,7 @@
     state.busy = false;
     $('#battle').classList.add('hidden');
     $('#setup').classList.remove('hidden');
+    setEditing(1);
   }
 
   function refreshAudioToggles() {
