@@ -31,6 +31,10 @@
           <button class="toggle active" data-enemy="mirror" title="Same army as yours">Mirror</button>
           <button class="toggle" data-enemy="random" title="Random units, equal total strength">Random</button>
         </div>
+        <div class="audio-toggles">
+          <button class="toggle audio-music" title="Music on/off (M)">&#127925;</button>
+          <button class="toggle audio-sfx" title="Sound effects on/off (S)">&#128266;</button>
+        </div>
         <button id="btn-start" class="btn-gold">To Battle!</button>
       </div>
     </section>
@@ -43,6 +47,10 @@
           <div class="btn-group">
             <button id="btn-retreat" class="btn-stone" title="Retreat (Esc)">&#9873;<span>Retreat</span></button>
             <button id="btn-auto" class="btn-stone" title="Auto combat (A)">&#9881;<span>Auto</span></button>
+            <div class="audio-toggles stacked">
+              <button class="btn-stone audio-music" title="Music on/off (M)">&#127925;</button>
+              <button class="btn-stone audio-sfx" title="Sound effects on/off (S)">&#128266;</button>
+            </div>
           </div>
           <div id="info"></div>
           <div id="log"></div>
@@ -66,6 +74,7 @@
   <script src="js/sprites/good.js"></script>
   <script src="js/sprites/evil.js"></script>
   <script src="js/sprites/wild.js"></script>
+  <script src="js/audio.js"></script>
   <script src="js/renderer.js"></script>
   <script src="js/game.js"></script>
 </body>

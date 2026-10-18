@@ -1,7 +1,8 @@
 // Game controller: setup screen, battle flow, input and HUD.
 (function () {
   const BH = window.BH;
-  const { Hex, Units, Battle: B, AI, Sprites, Renderer } = BH;
+  const { Hex, Units, Battle: B, AI, Sprites, Renderer, Audio } = BH;
+  const sfx = (name, opts) => Audio && Audio.play(name, opts);
 
   const $ = (sel) => document.querySelector(sel);
   const DEFAULT_ARMY = ['pikeman', 'archer', 'griffin', 'swordsman', 'monk', 'mage', 'cavalier'];
@@ -595,6 +596,7 @@
 
   function showResult() {
     const win = state.battle.winner === 'player';
+    sfx(win ? 'victory' : 'defeat');
     showModal(`<h2>${win ? 'Victory!' : 'Defeat'}</h2>
       <p>${win ? 'The enemy army has been destroyed.' : 'Your army has fallen.'} Battle lasted ${state.battle.round} rounds.</p>
       <div class="casualties">${casualtiesHtml('player')}${casualtiesHtml('ai')}</div>
@@ -614,6 +616,43 @@
     $('#setup').classList.remove('hidden');
   }
 
+  function refreshAudioToggles() {
+    document.querySelectorAll('.audio-music').forEach((b) => b.classList.toggle('off', !Audio.musicOn));
+    document.querySelectorAll('.audio-sfx').forEach((b) => b.classList.toggle('off', !Audio.sfxOn));
+  }
+
+  function bindAudio() {
+    if (!Audio || !Audio.available) {
+      document.querySelectorAll('.audio-toggles').forEach((el) => el.classList.add('hidden'));
+      return;
+    }
+    const unlock = () => Audio.unlock();
+    for (const ev of ['pointerdown', 'touchend', 'keydown']) document.addEventListener(ev, unlock, { capture: true });
+    const toggleMusic = () => {
+      Audio.setMusic(!Audio.musicOn);
+      refreshAudioToggles();
+    };
+    const toggleSfx = () => {
+      Audio.setSfx(!Audio.sfxOn);
+      refreshAudioToggles();
+      sfx('click');
+    };
+    document.querySelectorAll('.audio-music').forEach((b) => b.addEventListener('click', toggleMusic));
+    document.querySelectorAll('.audio-sfx').forEach((b) => b.addEventListener('click', toggleSfx));
+    window.addEventListener('keydown', (e) => {
+      if (e.target && e.target.tagName === 'INPUT') return;
+      const k = e.key.toLowerCase();
+      if (k === 'm') toggleMusic();
+      else if (k === 's') toggleSfx();
+    });
+    // UI click feedback for every button and unit card
+    document.addEventListener('click', (e) => {
+      if (e.target.closest('button, .unit-card, .army-slot') && !e.target.closest('.audio-sfx')) sfx('click');
+    });
+    refreshAudioToggles();
+  }
+
   buildSetup();
   bindButtons();
+  bindAudio();
 })();

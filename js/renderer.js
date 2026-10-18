@@ -30,6 +30,7 @@
     lightning: ['rgba(255,255,255,1)', 'rgba(140,200,255,0.95)', 'rgba(60,120,255,0)'],
     ray: ['rgba(255,230,255,1)', 'rgba(200,80,255,0.9)', 'rgba(90,0,140,0)'],
   };
+  const sound = (name, opts) => BH.Audio && BH.Audio.play(name, opts);
   const ease = (t) => (t < 0.5 ? 2 * t * t : 1 - (-2 * t + 2) ** 2 / 2);
   const now = () => performance.now();
 
@@ -514,6 +515,7 @@
       if (ev.teleport) {
         const to = norm(ev.path[ev.path.length - 1].col, ev.path[ev.path.length - 1].row);
         d.facing = to.x >= d.x ? 1 : -1;
+        sound('teleport');
         this.addBurst(d, 'teleport', 400 / speed);
         await this.tween(220 / speed, (k) => (d.alpha = 1 - k));
         d.x = to.x;
@@ -527,6 +529,7 @@
         const to = norm(ev.path[ev.path.length - 1].col, ev.path[ev.path.length - 1].row);
         d.facing = to.x >= from.x ? 1 : -1;
         const dist = Math.hypot(to.x - from.x, to.y - from.y);
+        sound('flap', { volume: 0.8 });
         await this.tween((250 + dist * 70) / speed, (k) => {
           const e = ease(k);
           d.x = from.x + (to.x - from.x) * e;
@@ -540,6 +543,7 @@
         const from = { x: d.x, y: d.y };
         const to = norm(h.col, h.row);
         if (Math.abs(to.x - from.x) > 0.01) d.facing = to.x > from.x ? 1 : -1;
+        sound('step', { volume: 0.6 });
         await this.tween(150 / speed, (k) => {
           d.x = from.x + (to.x - from.x) * k;
           d.y = from.y + (to.y - from.y) * k;
@@ -561,9 +565,16 @@
       } else {
         const dx = dt.x - da.x;
         const dy = dt.y - da.y;
+        if (att.def.perks.breath || (att.def.attackType === 'splash' && !att.def.ranged)) sound('roar');
         await this.tween(140 / speed, (k) => (da.lunge = { x: dx * 0.3 * ease(k), y: dy * 0.3 * ease(k) }));
         if (att.def.attackType === 'splash' || att.def.perks.breath) this.addBurst(dt, 'fire', 450 / speed);
       }
+      if (!ev.ranged) {
+        sound(BH.Audio ? BH.Audio.meleeSound(att.def) : 'slash', { volume: ev.retaliation ? 0.8 : 1 });
+        if (att.def.attackType === 'splash' || att.def.perks.breath) sound('explosion', { volume: 0.5 });
+      }
+      if (ev.deathBlow) sound('crit');
+      if (ev.hits.some((h) => h.dead)) sound('death', { delay: 0.12 });
       this.applyHits(ev, speed);
       if (!ev.ranged) await this.tween(160 / speed, (k) => (da.lunge = { x: (dt.x - da.x) * 0.3 * (1 - k), y: (dt.y - da.y) * 0.3 * (1 - k) }));
       da.lunge = { x: 0, y: 0 };
@@ -596,6 +607,8 @@
 
     animProjectile(att, da, dt, speed) {
       const kind = PROJECTILES[att.type] || 'arrow';
+      const [launchSfx, impactSfx] = BH.Audio ? BH.Audio.projectileSounds(kind) : [];
+      sound(launchSfx);
       const from = { x: da.x + da.facing * 0.5, y: da.y - 1.1 };
       const to = { x: dt.x, y: dt.y - 0.8 };
       const dist = Math.hypot(to.x - from.x, to.y - from.y);
@@ -661,6 +674,7 @@
         },
       });
       return this.wait(dur).then(() => {
+        sound(impactSfx);
         if (kind === 'fireball') this.addBurst(dt, 'fire', 500 / speed);
         else if (kind === 'cloud') this.addBurst(dt, 'cloud', 500 / speed);
         else if (kind === 'ray') this.addBurst(dt, 'stare', 400 / speed);
@@ -712,6 +726,12 @@
         const d = this.display.get(h.unitId);
         if (!d) continue;
         const t0 = now();
+        if (h.reborn) sound('rebirth');
+        else if (h.heal) sound('heal');
+        else if (h.damage || h.kills) sound(ev.fire ? 'explosion' : 'stare', { volume: ev.fire ? 0.6 : 1 });
+        else if (h.text === 'Bound!') sound('bind');
+        else if (h.text) sound('stun');
+        if (h.dead) sound('death', { delay: 0.12 });
         if (h.reborn) {
           this.addBurst(d, 'fire', 700 / speed);
           d.dead = false;
@@ -745,6 +765,7 @@
     }
 
     async animDefend(ev, speed) {
+      sound('defend');
       const d = this.display.get(ev.unitId);
       this.texts.push({ x: d.x, y: d.y - 1.4, text: 'Defend', color: '#bfe0ff', t0: now(), dur: 900 / speed, scale: 0.45 });
       await this.wait(350 / speed);

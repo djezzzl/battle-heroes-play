@@ -279,3 +279,10 @@ button { font-family: var(--font); cursor: pointer; }
 }
 #unit-card h3 { margin: 0 0 4px; color: var(--gold); font-size: 16px; }
 #unit-card canvas { width: 100%; aspect-ratio: 4 / 3; border: 1px solid #000; margin-bottom: 4px; }
+
+/* ---------------- audio toggles ---------------- */
+
+.audio-toggles { display: flex; gap: 4px; }
+.audio-toggles.stacked { flex-direction: column; }
+.audio-toggles.stacked .btn-stone { min-width: 44px; height: auto; flex: 1; font-size: 18px; padding: 0 6px; }
+.audio-toggles .off { opacity: 0.45; text-decoration: line-through; filter: grayscale(1); }
